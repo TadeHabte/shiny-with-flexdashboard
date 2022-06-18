@@ -1,4 +1,4 @@
-# Building a dashboard shiny together with flexdashboard
+# Building a dashboard with shiny together with flexdashboard
 Perhaps many gurus have written or said how we can have seamless interactive dashboard within R Markdown using Shiny together with flexdashboard. After using diferent ways to produce dahsboards, flexdashboard seems one of my favourite and wanted to share mine.
 https://bit.ly/PoCsUNHCR_dashboard
 
