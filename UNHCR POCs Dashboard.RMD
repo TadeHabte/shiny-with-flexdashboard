@@ -1,0 +1,576 @@
+---
+title: "UNHCR"
+
+#output: html_document
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: row
+    vertical_layout: fill
+runtime: shiny
+
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)#https://pkgs.rstudio.com/flexdashboard/
+library(readr)
+library(tidyverse)
+#library(dplyr)
+#library(plotly)
+library(crosstalk)
+library(dygraphs)
+library(lubridate)
+#library(xts)
+library(shiny)
+library(knitr)
+#library(DT)
+library(highcharter)
+
+#https://jkunst.com/highcharter/
+#https://api.highcharts.com/highcharts/
+#https://jkunst.com/blog/posts/2020-06-26-valuebox-and-sparklines/
+
+hc_theme_sparkline_vb <- function(...) {
+  
+  theme <- list(
+    chart = list(
+      backgroundColor = NULL,
+      margins = c(0, 0, 0, 0),
+      spacingTop = 0,
+      spacingRight = 0,
+      spacingBottom = 0,
+      spacingLeft = 0,
+      plotBorderWidth = 0,
+      borderWidth = 0,
+      style = list(overflow = "visible")
+    ),
+    xAxis = list(
+      visible = FALSE, 
+      endOnTick = FALSE, 
+      startOnTick = FALSE
+    ),
+    yAxis = list(
+      visible = FALSE,
+      endOnTick = FALSE, 
+      startOnTick = FALSE
+    ),
+    tooltip = list(
+      outside = FALSE,
+      shadow = FALSE,
+      borderColor = "transparent",
+      botderWidth = 0,
+      backgroundColor = "transparent",
+      style = list(textOutline = "5px white")
+    ),
+    plotOptions = list(
+      series = list(
+        marker = list(enabled = FALSE),
+        lineWidth = 2,
+        shadow = FALSE,
+        fillOpacity = 0.25,
+        color = "#FFFFFFBF",
+        fillColor = list(
+          linearGradient = list(x1 = 0, y1 = 1, x2 = 0, y2 = 0),
+          stops = list(
+            list(0.00, "#FFFFFF00"),
+            list(0.50, "#FFFFFF7F"),
+            list(1.00, "#FFFFFFFF")
+          )
+        )
+      )
+    ),
+    credits = list(
+      enabled = FALSE,
+      text = ""
+      )
+    )
+  
+  theme <- structure(theme, class = "hc_theme")
+  
+  if (length(list(...)) > 0) {
+    theme <- hc_theme_merge(
+      theme,
+      hc_theme(...)
+    )
+  }
+  
+  theme
+}
+
+
+valueBoxSpark <- function(value, title=NULL, sparkobj = NULL, subtitle=NULL, info = NULL, 
+                          icon = NULL, color = "aqua", width = 4, href = NULL){
+  
+  shinydashboard:::validateColor(color)
+  
+  if (!is.null(icon))
+    shinydashboard:::tagAssert(icon, type = "i")
+  
+  info_icon <- tags$small(
+    tags$i(
+      class = "fa fa-info-circle fa-lg",
+      title = info,
+      `data-toggle` = "tooltip",
+      style = "color: rgba(255, 255, 255, 0.75);"
+      ),
+
+    class = "pull-right float-right"
+    )
+
+  boxContent <- div(
+    class = paste0("small-box bg-", color),
+    div(
+      class = "inner",
+      if (!is.null(sparkobj)) info_icon,
+      h3(value),
+      if (!is.null(sparkobj)) sparkobj,
+      p(subtitle)
+      ),
+    if (!is.null(icon)) div(class = "icon-large icon", icon, style = "z-index; 0")
+    )
+
+  div(
+    class = if (!is.null(width)) paste0("col-sm-", width), 
+    boxContent
+    )
+}
+
+```
+
+```{r load_clean_data, echo=FALSE}
+
+# download data using unhcrdatapackage 
+#https://github.com/Edouard-Legoupil/unhcrdatapackage
+
+population=unhcrdatapackage::end_year_population_totals
+code=unhcrdatapackage::reference%>%
+  select(iso_3,UNHCRBureau)
+population=merge(population,code,by.x = "CountryAsylumCode",by.y = "iso_3",all.x = T)
+
+# Let's shorten long country names in all columns
+population[population == "United Kingdom of Great Britain and Northern Ireland"] <- "UK"
+population[population == "Iran (Islamic Republic of)"] <- "Iran"
+population[population == "United Republic of Tanzania"] <- "Tanzania"
+population[population == "Venezuela (Bolivarian Republic of)"] <- "Venezuela"
+population[population == "Republic of North Macedonia"] <- "North Macedonia"
+population[population == "China, Hong Kong Special Administrative Region"] <- "China"
+population[population == "Republic of Moldova"] <- "Moldova"
+population[population =="Democratic Republic of the Congo"]<-"Congo DR"
+population[population =="Syrian Arab Republic"]<-"Syria"
+population[population =="United States of America"]<-"USA"
+population[population =="Central African Republic"]<-"CAR"
+
+population$CountryOriginName<-as.factor(population$CountryOriginName)
+population$CountryOriginCode<-as.factor(population$CountryOriginCode)
+population$CountryAsylumName<-as.factor(population$CountryAsylumName)
+population$CountryAsylumCode<-as.factor(population$CountryAsylumCode)
+
+sd_Trend<-SharedData$new(population)
+
+
+```
+
+# Overview 
+
+Column {.sidebar}
+--------------------------------------------------
+
+Refugees, internally displaced persons, asylum-seekers and other persons of concern to UNHCR 
+
+```{r}
+
+filter_checkbox("UNHCRBureaue", "Select Bureau", sd_Trend, group = ~UNHCRBureau,
+                               inline = FALSE)
+
+sliderInput(inputId ="year", label = "Year:",
+            min = 2000, max = 2021, value =2021, step = 1, sep = "") # use sep = "" to remove the ',' from the integer year
+
+#checkboxGroupInput("POCs","",choices = c("Refugee","Asylum seeker","IDP","Stateless","Other of concern"),selected = "REF")
+
+
+```
+
+Data sources:
+[www.unhcr.org/refugee-statistics/](https://www.unhcr.org/refugee-statistics/)
+
+Draft!\\
+
+Tadesse 
+
+Row
+-------------------------------------
+
+### **Total persons of concern** {.value-box}
+
+```{r}
+
+data1 <- reactive({
+  sd_Trend$data(withSelection = TRUE, withFilter = TRUE)%>% 
+    filter(Year>1999)%>%
+    select(Year,REF, ASY,IDP,STA,OOC)%>%
+    group_by(Year)%>%
+    summarise(R=sum(REF),
+              Asylums=sum(ASY),
+              IDPs=sum(IDP), 
+              Stateless=sum(STA),
+              OOCs=sum(OOC),T=sum(REF+ASY+IDP+OOC+STA))
+})
+
+ 
+renderValueBox({
+
+  hc <- hchart(data1(), "area", hcaes(x=Year, y=T), name = "Summary",color="red")  %>%
+     hc_size( width = 150, height = 50) %>%
+  #hc_size(height = 100) %>%
+  hc_credits(enabled = FALSE) %>%
+  hc_add_theme(hc_theme_sparkline_vb())
+  v0=data1()%>%filter(Year==input$year)
+  v=paste(format(sum(v0$T), big.mark = ","), "", sep = " ")
+  v=as.character(v)
+  valueBoxSpark(
+   value=v,
+   sparkobj = hc,
+   #icon = icon("code"),
+   width = 20,
+   color = "light-blue",
+   href = NULL
+
+    )
+})
+
+
+```
+
+### Refugees
+
+```{r}
+
+renderValueBox({
+  
+  hc <- hchart(data1(), "area", hcaes(x=Year, y=R), name = "Refugees",color="red")  %>% 
+     hc_size( width = 150, height = 50) %>%
+  #hc_size(height = 100) %>% 
+  hc_credits(enabled = FALSE) %>% 
+  hc_add_theme(hc_theme_sparkline_vb()) 
+  v0=data1()%>%filter(Year==input$year)
+  v=paste(format(sum(v0$R), big.mark = ","), "", sep = " ")
+  valueBoxSpark(
+   value=v,
+   sparkobj = hc,
+   #subtitle =  "Refugees",
+   #icon = icon("code"),
+   width = 20,
+   color = "light-blue",
+   href = NULL
+   
+    )
+})
+
+```
+
+### Asylum seekers
+
+```{r}
+
+renderValueBox({
+  
+  hc <- hchart(data1(), "area", hcaes(x=Year, y=Asylums), name = "Asylum seekers",color="red")  %>% 
+     hc_size( width = 150, height = 50) %>%
+    hc_credits(enabled = FALSE) %>% 
+  hc_add_theme(hc_theme_sparkline_vb())
+  
+  v0=data1()%>%filter(Year==input$year)
+  v=paste(format(sum(v0$Asylums), big.mark = ","), "", sep = " ")
+  valueBoxSpark(
+   value=v,
+   sparkobj = hc,
+   width = 20,
+   color = "light-blue",
+   href = NULL
+   
+    )
+})
+
+
+```
+
+### Internally displaced persons
+
+```{r}
+
+renderValueBox({
+  
+  hc <- hchart(data1(), "column", hcaes(x=Year, y=IDPs), name = "IDPs",color="white")  %>% 
+  hc_size( width = 150, height = 50) %>% 
+  hc_credits(enabled = FALSE) %>% 
+  hc_add_theme(hc_theme_sparkline_vb()) 
+  v0=data1()%>%filter(Year==input$year)
+  v=paste(format(sum(v0$IDPs), big.mark = ","), "", sep = " ")
+  valueBoxSpark(
+   value=v,
+   sparkobj = hc,
+   #icon = icon("code"),
+   width = 30,
+   color = "light-blue",
+   href = NULL
+   
+    )
+})
+
+```
+
+### Stateless
+```{r}
+
+renderValueBox({
+  
+  hc <- hchart(data1(), "column", hcaes(x=Year, y=Stateless), name = "Stateless",color="white")  %>% 
+  hc_size( width = 150, height = 50) %>% 
+  hc_credits(enabled = FALSE) %>% 
+  hc_add_theme(hc_theme_sparkline_vb()) 
+  v0=data1()%>%filter(Year==input$year)
+  v=paste(format(sum(v0$Stateless), big.mark = ","), "", sep = " ")
+  valueBoxSpark(
+   value=v,
+   sparkobj = hc,
+   #icon = icon("code"),
+   width = 30,
+   color = "light-blue",
+   href = NULL
+   
+    )
+})
+
+```
+
+### Other of concerns
+```{r}
+
+renderValueBox({
+  
+  hc <- hchart(data1(), "column", hcaes(x=Year, y=OOCs), name = "Others",color="white")  %>% 
+  hc_size( width = 150, height = 50) %>% 
+  hc_credits(enabled = FALSE) %>% 
+  hc_add_theme(hc_theme_sparkline_vb()) 
+  v0=data1()%>%filter(Year==input$year)
+  v=paste(format(sum(v0$OOCs), big.mark = ","), "", sep = " ")
+  valueBoxSpark(
+   value=v,
+   sparkobj = hc,
+   #icon = icon("code"),
+   width = 30,
+   color = "light-blue",
+   href = NULL
+   
+    )
+})
+
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Displacement trend
+
+```{r ,echo=FALSE}
+
+data <- reactive({
+  sd_Trend$data(withSelection = TRUE, withFilter = TRUE)%>% 
+    select(Year,REF, ASY,IDP,STA,OOC)%>%
+    group_by(Year)%>%
+    summarise(R=sum(REF),
+              Asylums=sum(ASY),
+              IDPs=sum(IDP), 
+              Stateless=sum(STA),
+              OOC=sum(OOC))
+})
+
+renderDygraph(
+  dygraph(data()%>%filter(
+    Year>1989), main = "Persons of concern to UNHCR")%>%
+  dySeries("R",  color = "red", label = "Refugees") %>% 
+  dyOptions(axisLabelFontSize=10)%>%
+    dyAxis(
+    "y",axisLabelFontSize=10,
+    #label = "Asylum seekers",
+    #http://stackoverflow.com/questions/2901102/how-to-print-a-number-with-commas-as-thousands-separators-in-javascript
+    valueFormatter = 'function(d){return d.toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g, ",");}',
+    axisLabelFormatter = 'function(d){return d.toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g, ",");}'
+  )%>%
+  #dySeries( "Year",dyOptions(labelsKMB = FALSE))%>% 
+  dyRangeSelector() %>%
+  dyEvent("1994", "Rwanda Genocide", labelLoc = "bottom")%>%
+  dyEvent("2003", "U.S.A invasion of Iraq", labelLoc = "bottom")%>%
+  dyEvent("2011", "Syria crisis", labelLoc = "bottom")%>%
+  dyEvent("2013", "South sudan civil war", labelLoc = "bottom")%>%
+  dyEvent("2010", "Arab spring", labelLoc = "bottom")%>%
+  dyEvent("2016", "Brexit", labelLoc = "bottom")%>%
+  dyAnnotation("2015", text = "G", tooltip = "Germany allowed Syrian refugees into the country")%>%
+  dyEvent("2020", "Nagorno-Karabakh clashes", labelLoc = "bottom")%>% 
+  dyEvent("2021", "U.S.A withdrwal from Afghanistan", labelLoc = "bottom")%>%  
+  dyGroup(c("Asylums", "IDPs","Stateless","OOC"), drawPoints = TRUE, color = c("blue", "green","black","Aqua"))%>%
+  dyLegend(width = 600)%>%
+  dyLegend(show = "follow") # show legend only when hover on the series 
+  
+  
+ )
+
+
+```
+
+Row 
+-------------------------------------
+
+### Top displacement situations by country of origin
+
+```{r}
+
+data_COO <- reactive({
+
+   sd_Trend$data(withSelection = TRUE, withFilter = TRUE)%>%
+    filter(Year==input$year)%>%
+    group_by(Year,COA=CountryAsylumName,COO=CountryOriginName)%>%
+    summarise(Refs=sum(REF),
+              Asylums=sum(ASY),
+              IDPs=sum(IDP),
+              Stateless=sum(STA),
+              OOC=sum(OOC),
+              T=sum(REF+ASY))
+
+})
+
+renderHighchart({
+  
+d<- data_COO()%>%select(COO,Refs,Asylums,T)%>%
+  group_by(COO)%>%
+  summarise(Refs=sum(Refs),Asylums=sum(Asylums),T=sum(T))%>%
+  arrange(desc(T))%>%
+  head(10)%>%
+  mutate(COO =reorder(COO,T))
+
+  hchart(d, 'bar', hcaes(x = COO, y = T),name = "Total")%>%
+    #hc_colors("#0072BC")%>% 
+    hc_xAxis(title = list(text = "")) %>%
+    hc_yAxis(title = list(text = ""))%>%
+    hc_plotOptions(
+      bar = list(
+      dataLabels = list(
+        enabled = FALSE
+        #,format = "{point.T}"
+
+      )
+    )
+  )
+
+
+  })
+
+```
+
+### Top Refugee situation by country of asylum
+
+```{r}
+
+data_COA2 <- reactive({
+
+   sd_Trend$data(withSelection = TRUE, withFilter = TRUE)%>%
+    filter(Year==input$year)%>%
+    group_by(Year,COA=CountryAsylumName,COO=CountryOriginName)%>%
+    summarise(Refs=sum(REF),
+              Asylums=sum(ASY),
+              IDPs=sum(IDP),
+              Stateless=sum(STA),
+              OOC=sum(OOC),
+              T=sum(REF+ASY))
+})
+
+renderHighchart({
+  ddd=data_COA2()%>%
+  group_by(COA)%>%
+  summarise(Refs=sum(Refs),Asylums=sum(Asylums),T=sum(T))%>%
+  arrange(desc(T))%>%
+  head(10)%>%
+  mutate(COA =reorder(COA,T))
+
+  highchart()%>%
+  hc_chart(type = "bar") %>%
+  hc_plotOptions(
+    column = list(
+    dataLabels = list(enabled = FALSE),enableMouseTracking = FALSE),
+    series=list(stacking = "percent"))%>%
+  hc_xAxis(categories =ddd$COA)%>%
+  hc_series(list(name="Refugees",data=ddd$Refs),
+            list(name="Asylum-seekers",data=ddd$Asylums)
+            # ,list(name="Asylum-seekers",data=ddd$IDPs),
+            # list(name="Asylum-seekers",data=ddd$Stateless),
+            # list(name="Asylum-seekers",data=ddd$OOC)
+            )%>%
+  hc_yAxis(labels = list(format = "{value}%"), max = 100)
+  
+})
+
+```
+
+### Top IDP situation
+
+```{r}
+
+renderHighchart({
+  
+d<- data_COO()%>%select(COO,IDPs,T)%>%
+  group_by(COO)%>%
+  summarise(IDPs=sum(IDPs))%>%
+  arrange(desc(IDPs))%>%filter(IDPs>0)%>%
+  head(10)%>%
+  mutate(COO =reorder(COO,IDPs))
+
+  hchart(d, 'bar', hcaes(x = COO, y = IDPs),name = "IDPs")%>%
+    hc_xAxis(title = list(text = "")) %>%
+    hc_yAxis(title = list(text = ""))%>%
+    hc_plotOptions(
+      bar = list(
+      dataLabels = list(
+        enabled = FALSE
+        #,format = "{point.T}"
+
+      )
+    )
+  )
+
+
+  })
+
+```
+
+# Solutions
+
+Row 
+-------------------------------------
+
+Coming soon: UNHCR durable solutions data analysis.\
+https://www.unhcr.org/solutions.html
+
+
+```{r}
+
+```
+
+
+# Machine Learning
+
+Row 
+-------------------------------------
+
+Can we write a model to predict  solutions ,displacements, statelessness ...etc 
+
+# Notes:
+
+Data used : unhcrdatapackage(from R Package)
+
+
+Stat as of June 2021
+
+Row 
+-------------------------------------
+
+
+
