@@ -13,5 +13,3 @@ https://bookdown.org/yihui/rmarkdown-cookbook/
 # Hosting your dashbboard 
 You want to share your shiny app? Here is a guide:
 https://shiny.rstudio.com/tutorial/written-tutorial/lesson7/
-
-# 
